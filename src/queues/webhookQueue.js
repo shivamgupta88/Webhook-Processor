@@ -17,14 +17,34 @@ const webhookQueue = new Queue("webhook-processing", {
     attempts: 3,
     backoff: {
       type: "exponential",
-      delay: 2000, // Start with 2 seconds
+      delay: 2000,
     },
-    removeOnComplete: 100, // Keep last 100 completed jobs
-    removeOnFail: 50, // Keep last 50 failed jobs
+    removeOnComplete: 100,
+    removeOnFail: 50,
   },
 });
 
-// Webhook processor worker - your style!
+// Move to dead letter function (temporary - we'll improve this)
+const moveToDeadLetter = async (webhookId, reason, finalError = null) => {
+  try {
+    const webhook = await Webhook.findOne({ webhookId });
+    if (webhook) {
+      webhook.status = "dead_letter";
+      webhook.errors.push({
+        message: `Dead Letter: ${reason}`,
+        stack: finalError || "Max retries exceeded",
+        timestamp: new Date(),
+      });
+      await webhook.save();
+
+      console.log(`💀 Moved to dead letter: ${webhookId} - Reason: ${reason}`);
+    }
+  } catch (error) {
+    console.error(`❌ Failed to move to dead letter: ${webhookId}`, error);
+  }
+};
+
+// Webhook processor worker
 const webhookWorker = new Worker(
   "webhook-processing",
   async (job) => {
@@ -32,7 +52,7 @@ const webhookWorker = new Worker(
   },
   {
     connection: redis,
-    concurrency: 5, // Process 5 webhooks simultaneously
+    concurrency: 5,
   }
 );
 
@@ -45,20 +65,16 @@ const processWebhookJob = async (job) => {
   );
 
   try {
-    // Get webhook from database
     const webhook = await Webhook.findOne({ webhookId });
     if (!webhook) {
       throw new Error(`Webhook ${webhookId} not found`);
     }
 
-    // Update status to processing
     webhook.status = "processing";
     await webhook.save();
 
-    // Process webhook by source
     await processWebhookBySource(webhook);
 
-    // Mark as completed
     webhook.status = "completed";
     webhook.processedAt = new Date();
     await webhook.save();
@@ -68,7 +84,6 @@ const processWebhookJob = async (job) => {
   } catch (error) {
     console.error(`❌ Webhook processing failed: ${webhookId}`, error.message);
 
-    // Update webhook with error
     const webhook = await Webhook.findOne({ webhookId });
     if (webhook) {
       webhook.errors.push({
@@ -78,7 +93,6 @@ const processWebhookJob = async (job) => {
       webhook.retryCount = job.attemptsMade + 1;
       webhook.lastRetryAt = new Date();
 
-      // If max attempts reached, move to failed
       if (job.attemptsMade + 1 >= 3) {
         webhook.status = "failed";
       }
@@ -86,7 +100,7 @@ const processWebhookJob = async (job) => {
       await webhook.save();
     }
 
-    throw error; // Re-throw for BullMQ retry logic
+    throw error;
   }
 };
 
@@ -112,29 +126,19 @@ const processWebhookBySource = async (webhook) => {
 // Source-specific processors
 const processGithubWebhook = async (webhook) => {
   const { payload } = webhook;
-
   console.log(`Processing GitHub event: ${payload.action || "unknown"}`);
-
-  // Simulate GitHub webhook processing
-  // Real logic: create issue, update PR status, deploy code, etc.
   await simulateProcessing(1000);
 
-  // Simulate potential failure for demo
   if (Math.random() < 0.1) {
-    // 10% chance of failure
     throw new Error("GitHub API rate limit exceeded");
   }
 };
 
 const processStripeWebhook = async (webhook) => {
   const { payload } = webhook;
-
   console.log(`Processing Stripe event: ${payload.type || "unknown"}`);
-
-  // Real logic: update payment status, send confirmation email
   await simulateProcessing(800);
 
-  // Simulate payment processing delay
   if (payload.type === "payment_intent.payment_failed") {
     throw new Error("Payment processing failed - insufficient funds");
   }
@@ -142,21 +146,15 @@ const processStripeWebhook = async (webhook) => {
 
 const processShopifyWebhook = async (webhook) => {
   const { payload } = webhook;
-
   console.log(`Processing Shopify event: ${payload.topic || "unknown"}`);
-
-  // Real logic: update inventory, process order, send notifications
   await simulateProcessing(1200);
 };
 
 const processGenericWebhook = async (webhook) => {
   console.log(`Processing generic webhook from: ${webhook.source}`);
-
-  // Generic processing logic
   await simulateProcessing(500);
 };
 
-// Simulate processing time
 const simulateProcessing = async (delay) => {
   await new Promise((resolve) => setTimeout(resolve, delay));
 };
@@ -166,17 +164,22 @@ webhookWorker.on("completed", (job, result) => {
   console.log(`✅ Job completed: ${job.id}`);
 });
 
-webhookWorker.on("failed", (job, error) => {
+webhookWorker.on("failed", async (job, error) => {
   console.log(`❌ Job failed: ${job.id} - ${error.message}`);
+
+  if (job.attemptsMade >= 3) {
+    const { webhookId } = job.data;
+    await moveToDeadLetter(webhookId, "Max retries exceeded", error.message);
+  }
 });
 
-webhookWorker.on("stalled", (jobId) => {
+webhookWorker.on("stalled", async (jobId) => {
   console.log(`⚠️  Job stalled: ${jobId}`);
 });
 
-// Export functions
 module.exports = {
   webhookQueue,
   webhookWorker,
   redis,
+  moveToDeadLetter,
 };

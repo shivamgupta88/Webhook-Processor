@@ -20,13 +20,16 @@ mongoose
   .then(() => console.log("✅ MongoDB Connected"))
   .catch((err) => console.error("❌ MongoDB Error:", err));
 
-// Initialize Queue System
+// Initialize Queue System (ONLY webhookQueue for now)
 const { webhookQueue, webhookWorker } = require("./src/queues/webhookQueue");
 console.log("✅ Queue System Initialized");
 
 // Routes
 const webhookRoutes = require("./src/routes/webhook");
+const analyticsRoutes = require("./src/routes/analytics");
+
 app.use("/api", webhookRoutes);
+app.use("/api/analytics", analyticsRoutes);
 
 // Health Check
 app.get("/health", (req, res) => {
@@ -34,6 +37,19 @@ app.get("/health", (req, res) => {
     status: "OK",
     timestamp: new Date().toISOString(),
     queue: "Ready",
+  });
+});
+
+// Admin dashboard route
+app.get("/admin", (req, res) => {
+  res.json({
+    message: "Webhook Processor Admin Dashboard",
+    endpoints: {
+      stats: "/api/analytics/stats",
+      webhooks: "/api/analytics/webhooks",
+      health: "/health",
+    },
+    timestamp: new Date().toISOString(),
   });
 });
 
@@ -48,5 +64,5 @@ process.on("SIGINT", async () => {
 // Start Server
 app.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
-  console.log(`📊 Queue dashboard: http://localhost:${PORT}/admin/queues`);
+  console.log(`📊 Dashboard: http://localhost:${PORT}/admin`);
 });
