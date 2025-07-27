@@ -34,7 +34,7 @@ const handleDeadLetter = async (job) => {
     const webhook = await Webhook.findOne({ webhookId });
     if (webhook) {
       webhook.status = "dead_letter";
-      webhook.errors.push({
+      webhook.errorLogs.push({
         message: `Dead Letter: ${reason}`,
         stack: finalError || "Max retries exceeded",
         timestamp: new Date(),
