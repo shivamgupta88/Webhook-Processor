@@ -7,6 +7,7 @@ const webhookSchema = new mongoose.Schema(
       type: String,
       required: true,
       unique: true,
+      index: true, // FIXED: Use only index: true, not both
       default: () =>
         `wh_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
     },
@@ -33,6 +34,7 @@ const webhookSchema = new mongoose.Schema(
       type: String,
       enum: ["received", "processing", "completed", "failed", "dead_letter"],
       default: "received",
+      index: true, // Add index for better query performance
     },
 
     // Retry Logic
@@ -50,14 +52,15 @@ const webhookSchema = new mongoose.Schema(
     receivedAt: {
       type: Date,
       default: Date.now,
+      index: true, // Add index for time-based queries
     },
 
     processedAt: Date,
 
     lastRetryAt: Date,
 
-    // Error Tracking
-    errors: [
+    // Error Tracking - FIXED: Renamed from 'errors' to avoid reserved keyword warning
+    errorLogs: [
       {
         message: String,
         timestamp: { type: Date, default: Date.now },
@@ -74,12 +77,13 @@ const webhookSchema = new mongoose.Schema(
   {
     timestamps: true,
     collection: "webhooks",
+    // FIXED: Add suppressReservedKeysWarning option
+    suppressReservedKeysWarning: true,
   }
 );
 
-// Indexes for performance
+// FIXED: Simplified indexes - removed duplicate webhookId index
 webhookSchema.index({ source: 1, receivedAt: -1 });
-webhookSchema.index({ status: 1 });
-webhookSchema.index({ webhookId: 1 });
+// webhookId index is already defined above with unique: true, index: true
 
 module.exports = mongoose.model("Webhook", webhookSchema);

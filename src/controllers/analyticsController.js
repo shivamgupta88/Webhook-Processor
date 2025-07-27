@@ -5,7 +5,6 @@ exports.getDashboardStats = async (req, res) => {
   try {
     const now = new Date();
     const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    const yesterday = new Date(today.getTime() - 24 * 60 * 60 * 1000);
 
     // Basic counts
     const totalWebhooks = await Webhook.countDocuments();
@@ -29,45 +28,9 @@ exports.getDashboardStats = async (req, res) => {
         $group: {
           _id: "$source",
           count: { $sum: 1 },
-          successRate: {
-            $avg: {
-              $cond: [{ $eq: ["$status", "completed"] }, 1, 0],
-            },
-          },
         },
       },
       { $sort: { count: -1 } },
-    ]);
-
-    // Hourly stats for last 24 hours
-    const hourlyStats = await Webhook.aggregate([
-      {
-        $match: {
-          receivedAt: { $gte: yesterday },
-        },
-      },
-      {
-        $group: {
-          _id: {
-            hour: { $hour: "$receivedAt" },
-            date: {
-              $dateToString: { format: "%Y-%m-%d", date: "$receivedAt" },
-            },
-          },
-          count: { $sum: 1 },
-          successful: {
-            $sum: {
-              $cond: [{ $eq: ["$status", "completed"] }, 1, 0],
-            },
-          },
-          failed: {
-            $sum: {
-              $cond: [{ $eq: ["$status", "failed"] }, 1, 0],
-            },
-          },
-        },
-      },
-      { $sort: { "_id.date": 1, "_id.hour": 1 } },
     ]);
 
     // Calculate success rate
@@ -92,7 +55,6 @@ exports.getDashboardStats = async (req, res) => {
           return acc;
         }, {}),
         sourceBreakdown: sourceCounts,
-        hourlyStats,
         lastUpdated: new Date().toISOString(),
       },
     });
@@ -120,9 +82,7 @@ exports.getRecentWebhooks = async (req, res) => {
       .sort({ receivedAt: -1 })
       .limit(limit * 1)
       .skip((page - 1) * limit)
-      .select(
-        "webhookId source status receivedAt processedAt retryCount errors"
-      );
+      .select("webhookId source status receivedAt processedAt retryCount");
 
     const total = await Webhook.countDocuments(filter);
 
@@ -206,7 +166,7 @@ exports.retryWebhook = async (req, res) => {
         webhookId: webhook.webhookId,
       },
       {
-        priority: 1, // High priority for manual retries
+        priority: 1,
       }
     );
 

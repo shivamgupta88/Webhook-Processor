@@ -1,17 +1,27 @@
 const Webhook = require("../models/webhook");
 const crypto = require("crypto");
-const { webhookQueue } = require("../queues/webhookQueue"); // Add this line
+const { webhookQueue } = require("../queues/webhookQueue");
+const sourceManager = require("../utils/sourceManager");
 
-// Main webhook receiver
+// Main webhook receiver with security
 exports.receiveWebhook = async (req, res) => {
   try {
     const { headers, body } = req;
 
-    // Extract source from headers or URL
+    // Extract source
     const source = extractSource(headers, req);
 
-    // Verify signature
-    const isVerified = verifySignature(headers, body);
+    // Check if source is disabled
+    if (sourceManager.isSourceDisabled(source)) {
+      console.warn(`🚫 Webhook rejected - source disabled: ${source}`);
+      return res.status(423).json({
+        success: false,
+        message: "Webhook source temporarily disabled due to high failure rate",
+      });
+    }
+
+    // Enhanced verification from middleware
+    const isVerified = req.isVerifiedWebhook || false;
 
     // Create webhook record
     const webhook = new Webhook({
@@ -24,14 +34,20 @@ exports.receiveWebhook = async (req, res) => {
 
     await webhook.save();
 
-    console.log(`✅ Webhook received: ${webhook.webhookId} from ${source}`);
+    console.log(
+      `✅ Webhook received: ${webhook.webhookId} from ${source} (Verified: ${isVerified})`
+    );
 
-    // Quick response - don't make sender wait!
+    // Quick response
     res.status(200).json({
       success: true,
       webhookId: webhook.webhookId,
       message: "Webhook received successfully",
+      verified: isVerified,
     });
+
+    // Check source health periodically
+    sourceManager.checkSourceHealth(source);
 
     // Add to queue for processing
     await processWebhookAsync(webhook);
@@ -44,10 +60,9 @@ exports.receiveWebhook = async (req, res) => {
   }
 };
 
-// Updated async processing - now uses queue!
+// Rest of the functions remain same...
 const processWebhookAsync = async (webhook) => {
   try {
-    // Add to queue with priority
     await webhookQueue.add(
       "process-webhook",
       {
@@ -55,7 +70,7 @@ const processWebhookAsync = async (webhook) => {
       },
       {
         priority: getWebhookPriority(webhook.source),
-        delay: 0, // Process immediately
+        delay: 0,
       }
     );
 
@@ -64,7 +79,7 @@ const processWebhookAsync = async (webhook) => {
     console.error(`❌ Queue error: ${webhook.webhookId}`, error);
 
     webhook.status = "failed";
-    webhook.errors.push({
+    webhook.errorLogs.push({
       message: `Queue error: ${error.message}`,
       stack: error.stack,
     });
@@ -72,47 +87,25 @@ const processWebhookAsync = async (webhook) => {
   }
 };
 
-// Priority system
 const getWebhookPriority = (source) => {
   const priorities = {
-    stripe: 1, // High priority (payments)
-    shopify: 1, // High priority (orders)
-    github: 2, // Medium priority
-    slack: 3, // Low priority
-    unknown: 5, // Lowest priority
+    stripe: 1,
+    shopify: 1,
+    github: 2,
+    slack: 3,
+    unknown: 5,
   };
 
   return priorities[source] || 5;
 };
 
-// Helper functions remain same
 const extractSource = (headers, req) => {
   if (headers["x-github-event"]) return "github";
   if (headers["stripe-signature"]) return "stripe";
   if (headers["x-shopify-topic"]) return "shopify";
   if (headers["user-agent"]?.includes("Slack")) return "slack";
 
-  return req.query.source || "unknown";
-};
-
-const verifySignature = (headers, body) => {
-  const secret = process.env.WEBHOOK_SECRET;
-  if (!secret) return false;
-
-  const signature =
-    headers["x-webhook-signature"] || headers["x-hub-signature-256"];
-  if (!signature) return false;
-
-  try {
-    const expectedSignature = crypto
-      .createHmac("sha256", secret)
-      .update(JSON.stringify(body))
-      .digest("hex");
-
-    return signature.includes(expectedSignature);
-  } catch (error) {
-    return false;
-  }
+  return req.query.source || headers["x-webhook-source"] || "unknown";
 };
 
 const sanitizeHeaders = (headers) => {
@@ -120,5 +113,6 @@ const sanitizeHeaders = (headers) => {
   delete sanitized.authorization;
   delete sanitized.cookie;
   delete sanitized["x-api-key"];
+  delete sanitized["x-auth-token"];
   return sanitized;
 };
