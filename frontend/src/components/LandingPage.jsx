@@ -22,7 +22,7 @@ function LandingPage({ onNavigate }) {
   const [currentCommand, setCurrentCommand] = useState(0);
 
   const commands = [
-    "curl -X POST https://webhooks.dev/user_abc123",
+    "curl -X POST https://webhook-processor.onrender.com/user_abc123",
     '{"event": "payment.success", "amount": 1000}',
     "✓ Webhook processed in 45ms",
   ];
