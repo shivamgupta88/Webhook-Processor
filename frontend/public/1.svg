@@ -1,0 +1,10 @@
+<svg width="32" height="32" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+  <rect width="32" height="32" rx="6" fill="#ef4444"/>
+  
+  <!-- Stylized W for Webhook -->
+  <path d="M6 8 L10 24 L13 12 L16 24 L19 12 L22 24 L26 8" 
+        stroke="white" stroke-width="3" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+  
+  <!-- Lightning accent -->
+  <path d="M24 6L22 10h1l-1 4 2-4h-1l1-4z" fill="white" opacity="0.8"/>
+</svg>
